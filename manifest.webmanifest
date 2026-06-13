@@ -1,0 +1,17 @@
+{
+  "name": "SLEEP.LOG",
+  "short_name": "SLEEP.LOG",
+  "description": "就寝時刻を押さえる → 夜食を断つ → 数値を守る",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050a05",
+  "theme_color": "#050a05",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
