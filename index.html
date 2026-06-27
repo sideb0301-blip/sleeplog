@@ -116,6 +116,43 @@
   .foot{margin-top:18px;font-size:10px;color:var(--phos-faint);letter-spacing:.1em;line-height:1.7}
   .foot a{color:var(--phos-dim);cursor:pointer;text-decoration:underline}
 
+  /* log rows are tappable */
+  .row{cursor:pointer}
+  .row:hover{background:rgba(20,80,40,.18)}
+  .row .edit{color:var(--phos-faint);font-size:11px;text-align:right}
+  .row:hover .edit{color:var(--phos-dim)}
+
+  .addbtn{width:100%;margin-top:10px;padding:12px;font-size:13px;
+    border:1px dashed var(--phos-dim);color:var(--phos-dim);background:transparent}
+  .addbtn:hover,.addbtn:focus-visible{background:var(--phos-faint);color:var(--phos);border-style:solid}
+
+  /* modal */
+  .modal-bg{position:fixed;inset:0;z-index:100;background:rgba(0,5,0,.82);
+    display:none;align-items:center;justify-content:center;padding:20px;
+    backdrop-filter:blur(1px)}
+  .modal-bg.on{display:flex}
+  .modal{width:100%;max-width:420px;background:var(--bg);border:1px solid var(--phos);
+    padding:18px;position:relative;box-shadow:0 0 24px rgba(51,255,102,.18)}
+  .modal h2{font-size:14px;letter-spacing:.14em;margin-bottom:14px;color:var(--phos)}
+  .modal .close{position:absolute;top:10px;right:12px;cursor:pointer;
+    color:var(--phos-dim);font-size:18px;line-height:1}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:11px;color:var(--phos-dim);
+    letter-spacing:.1em;margin-bottom:5px}
+  .field input[type=datetime-local]{width:100%;font-family:inherit;font-size:15px;
+    color:var(--phos);background:#081208;border:1px solid var(--phos-dim);
+    padding:11px 10px;border-radius:0;text-shadow:0 0 3px rgba(51,255,102,.4);
+    -webkit-appearance:none;appearance:none}
+  .field input:focus{outline:none;border-color:var(--phos)}
+  .field .clearwake{font-size:11px;color:var(--phos-dim);margin-top:6px;cursor:pointer;
+    text-decoration:underline;display:inline-block}
+  .modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+  .modal-actions button{padding:14px 10px;font-size:14px}
+  .modal-actions .del{grid-column:1 / -1;border-color:var(--danger);color:var(--danger);
+    text-shadow:0 0 4px rgba(255,91,74,.4)}
+  .modal-actions .del:hover,.modal-actions .del:focus-visible{background:var(--danger);color:var(--bg);text-shadow:none}
+  .modal-err{color:var(--amber);font-size:12px;margin-bottom:10px;min-height:16px;line-height:1.4}
+
   ::-webkit-scrollbar{width:8px}
   ::-webkit-scrollbar-thumb{background:var(--phos-faint)}
 </style>
@@ -125,7 +162,7 @@
   <header>
     <div class="bar">
       <h1>SLEEP.LOG</h1>
-      <span class="ver">v0.1 // local</span>
+      <span class="ver">v0.2 // local</span>
     </div>
     <div class="sub">就寝時刻を押さえる → 夜食を断つ → 数値を守る</div>
   </header>
@@ -155,12 +192,36 @@
     <div class="loghead"><span>// LOG</span><span id="logCount">0 records</span></div>
     <div class="log" id="log"></div>
   </div>
+  <button class="addbtn" id="addBtn">+ 過去の記録を手動追加</button>
 
   <div class="foot">
     DATA STORED LOCALLY ON THIS DEVICE.<br>
     早寝の閾値 = <span id="thr">24:30</span> 以前の就寝。<a id="setThr">[変更]</a><br>
     NEXT: Googleスプレッドシート連携 (GAS) / Apple Health 取込
     <span class="cursor"></span>
+  </div>
+</div>
+
+<!-- edit / add modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <span class="close" id="modalClose">✕</span>
+    <h2 id="modalTitle">EDIT RECORD</h2>
+    <div class="modal-err" id="modalErr"></div>
+    <div class="field">
+      <label>就寝 — SLEEP</label>
+      <input type="datetime-local" id="fBed">
+    </div>
+    <div class="field">
+      <label>起床 — WAKE</label>
+      <input type="datetime-local" id="fWake">
+      <span class="clearwake" id="clearWake">起床を空にする（まだ寝てる扱い）</span>
+    </div>
+    <div class="modal-actions">
+      <button id="modalSave">保存</button>
+      <button id="modalCancel">取消</button>
+      <button class="del" id="modalDel">この記録を削除</button>
+    </div>
   </div>
 </div>
 
@@ -172,11 +233,19 @@
 const KEY="sleeplog.v1";
 const THRKEY="sleeplog.threshold"; // 分単位 (24:30 = 24*60+30 = 1470, 翌日基準)
 let state=load();
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function load(){
-  try{const r=JSON.parse(localStorage.getItem(KEY));if(Array.isArray(r))return {records:r};}catch(e){}
+  try{const r=JSON.parse(localStorage.getItem(KEY));
+    if(Array.isArray(r)){
+      r.forEach(rec=>{if(!rec.id)rec.id=uid();}); // 旧データにidを補完
+      return {records:r};
+    }
+  }catch(e){}
   return {records:[]};
 }
 function save(){localStorage.setItem(KEY,JSON.stringify(state.records));}
+/* 記録は常に就寝時刻の昇順で保つ。手動追加・編集後に呼ぶ。 */
+function sortRecords(){state.records.sort((a,b)=>new Date(a.bed)-new Date(b.bed));}
 function getThreshold(){const v=parseInt(localStorage.getItem(THRKEY));return isNaN(v)?1470:v;} // 分(0=24:00基準ではなく深夜跨ぎ用に後述)
 function setThreshold(m){localStorage.setItem(THRKEY,m);}
 
@@ -214,7 +283,7 @@ function openRecord(){
 }
 function pressBed(){
   if(openRecord())return; // 既に就寝中
-  state.records.push({bed:new Date().toISOString(),wake:null});
+  state.records.push({id:uid(),bed:new Date().toISOString(),wake:null});
   save();render();
 }
 function pressWake(){
@@ -322,16 +391,103 @@ function render(){
     const dateStr=pad(b.getMonth()+1)+"/"+pad(b.getDate());
     const wakeStr=r.wake?("→"+fmtTime(new Date(r.wake))):"→ …";
     const durStr=dh==null?"in bed":dh.toFixed(1)+"h";
-    return `<div class="row"><span class="d">${dateStr}</span>`+
+    return `<div class="row" data-id="${r.id}"><span class="d">${dateStr}</span>`+
            `<span class="${cls}">${fmtTime(b)} ${wakeStr}</span>`+
            `<span class="dur">${durStr}</span></div>`;
   }).join("");
+  // 各行タップで編集モーダル
+  log.querySelectorAll(".row").forEach(el=>{
+    el.onclick=()=>openEdit(el.getAttribute("data-id"));
+  });
+}
+
+/* ---------- edit / add modal ---------- */
+let editingId=null; // null=新規追加, それ以外=編集対象のid
+
+// Date -> "YYYY-MM-DDTHH:MM" (ローカル, datetime-local用)
+function toLocalInput(d){
+  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+
+    "T"+pad(d.getHours())+":"+pad(d.getMinutes());
+}
+// "YYYY-MM-DDTHH:MM" -> Date (ローカル解釈)
+function fromLocalInput(s){
+  if(!s)return null;
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if(!m)return null;
+  return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]);
+}
+
+const modalBg=document.getElementById("modalBg");
+const fBed=document.getElementById("fBed");
+const fWake=document.getElementById("fWake");
+const modalErr=document.getElementById("modalErr");
+const modalDel=document.getElementById("modalDel");
+const modalTitle=document.getElementById("modalTitle");
+
+function openEdit(id){
+  const r=state.records.find(x=>x.id===id);if(!r)return;
+  editingId=id;
+  modalTitle.textContent="EDIT RECORD";
+  fBed.value=toLocalInput(new Date(r.bed));
+  fWake.value=r.wake?toLocalInput(new Date(r.wake)):"";
+  modalErr.textContent="";
+  modalDel.style.display="";
+  modalBg.classList.add("on");
+}
+function openAdd(){
+  editingId=null;
+  modalTitle.textContent="ADD RECORD";
+  // 既定値: 昨夜23:00就寝 → 今朝7:00起床 を仮置き（編集しやすい起点）
+  const now=new Date();
+  const bed=new Date(now);bed.setDate(bed.getDate()-1);bed.setHours(23,0,0,0);
+  const wake=new Date(now);wake.setHours(7,0,0,0);
+  fBed.value=toLocalInput(bed);
+  fWake.value=toLocalInput(wake);
+  modalErr.textContent="";
+  modalDel.style.display="none"; // 新規には削除ボタン不要
+  modalBg.classList.add("on");
+}
+function closeModal(){modalBg.classList.remove("on");editingId=null;}
+
+function saveModal(){
+  const bedD=fromLocalInput(fBed.value);
+  if(!bedD){modalErr.textContent="就寝日時を入力してください。";return;}
+  const wakeD=fromLocalInput(fWake.value);
+  if(wakeD&&wakeD<=bedD){
+    modalErr.textContent="起床は就寝より後の時刻にしてください。";return;
+  }
+  // 24時間超の睡眠は入力ミスの可能性が高い → 警告
+  if(wakeD&&(wakeD-bedD)/36e5>24){
+    modalErr.textContent="睡眠が24時間超です。日付を確認してください。";return;
+  }
+  if(editingId){
+    const r=state.records.find(x=>x.id===editingId);if(!r)return;
+    r.bed=bedD.toISOString();
+    r.wake=wakeD?wakeD.toISOString():null;
+  }else{
+    state.records.push({id:uid(),bed:bedD.toISOString(),wake:wakeD?wakeD.toISOString():null});
+  }
+  sortRecords();save();closeModal();render();
+}
+function deleteModal(){
+  if(!editingId)return;
+  if(!confirm("この記録を削除します。よろしいですか？"))return;
+  state.records=state.records.filter(x=>x.id!==editingId);
+  save();closeModal();render();
 }
 
 /* ---------- wire ---------- */
 document.getElementById("bedBtn").onclick=pressBed;
 document.getElementById("wakeBtn").onclick=pressWake;
 document.getElementById("undoBtn").onclick=undo;
+document.getElementById("addBtn").onclick=openAdd;
+document.getElementById("modalSave").onclick=saveModal;
+document.getElementById("modalCancel").onclick=closeModal;
+document.getElementById("modalClose").onclick=closeModal;
+document.getElementById("modalDel").onclick=deleteModal;
+document.getElementById("clearWake").onclick=()=>{fWake.value="";};
+// 背景タップで閉じる（モーダル本体タップは閉じない）
+modalBg.onclick=(e)=>{if(e.target===modalBg)closeModal();};
 document.getElementById("setThr").onclick=()=>{
   const cur=getThreshold();
   const inp=prompt("早寝の閾値を入力 (HH:MM / 深夜は25:00=翌1時 のように24超で指定可)",thrLabel(cur));
